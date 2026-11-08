@@ -25,7 +25,7 @@ import {
   type KpiWidget,
   type KpiWidgetSeries,
 } from '../data/kpiRepository';
-import { canApplyServerKpiPointUpdate, getNumericExtent, parseKpiNumber, splitKpiLineSegments, validateKpiSeries, type KpiDraftStatus } from '../domain/kpi';
+import { canApplyServerKpiPointUpdate, getNumericExtent, moveKpiWidget, parseKpiNumber, splitKpiLineSegments, validateKpiSeries, type KpiDraftStatus } from '../domain/kpi';
 import { useLocale } from '../i18n/LocaleProvider';
 import { getKpiSeriesValidationMessage, type Messages } from '../i18n/messages';
 
@@ -803,15 +803,11 @@ export function KpiPage() {
 
   async function reorderWidget(draggedId: string, targetId: string) {
     if (!dashboard || draggedId === targetId) return;
-    const next = [...dashboard.widgets];
-    const from = next.findIndex((item) => item.widgetId === draggedId);
-    const to = next.findIndex((item) => item.widgetId === targetId);
-    if (from < 0 || to < 0) return;
-    const [item] = next.splice(from, 1);
-    next.splice(to, 0, item);
+    const next = moveKpiWidget(dashboard.widgets, draggedId, targetId);
+    if (!next) return;
     try {
-      await Promise.all(next.map((widget, index) => updateKpiWidget(widget.widgetId, { sortOrder: index })));
-      setDashboard((current) => current ? { ...current, widgets: next.map((widget, index) => ({ ...widget, sortOrder: index })) } : current);
+      await Promise.all(next.map((widget) => updateKpiWidget(widget.widgetId, { sortOrder: widget.sortOrder })));
+      setDashboard((current) => current ? { ...current, widgets: next } : current);
     } catch (error) {
       handleRequestError(error);
       if (dashboardId) await refreshDashboard(dashboardId);
@@ -1040,7 +1036,7 @@ export function KpiPage() {
                 <div className="kpi-empty-chart-state"><p>{m.kpiDashboardEmpty}</p></div>
               ) : (
                 <div className="kpi-widget-grid">
-                  {[...dashboard.widgets].sort((left, right) => left.sortOrder - right.sortOrder).map((widget, index) => (
+                  {[...dashboard.widgets].sort((left, right) => left.sortOrder - right.sortOrder).map((widget, index, orderedWidgets) => (
                     <article
                       className="kpi-widget"
                       style={{ gridColumn: widget.gridWidth >= 12 ? '1 / -1' : 'span 6', minHeight: `${Math.max(250, widget.gridHeight * 66)}px` }}
@@ -1067,8 +1063,8 @@ export function KpiPage() {
                           <label className="kpi-compact-control"><span>{m.kpiPeriods}</span><select value={widget.periodCount} onChange={(event) => void updateLayout(widget, { periodCount: Number(event.target.value) })}>
                             {[4, 8, 12, 16, 24, 36, 52, 60].map((count) => <option value={count} key={count}>{count}</option>)}
                           </select></label>
-                          <button className="kpi-icon-button" type="button" aria-label={m.kpiMoveUp} title={m.kpiMoveUp} disabled={index === 0} onClick={() => void updateLayout(widget, { sortOrder: index - 1 })}>↑</button>
-                          <button className="kpi-icon-button" type="button" aria-label={m.kpiMoveDown} title={m.kpiMoveDown} disabled={index === dashboard.widgets.length - 1} onClick={() => void updateLayout(widget, { sortOrder: index + 1 })}>↓</button>
+                          <button className="kpi-icon-button" type="button" aria-label={m.kpiMoveUp} title={m.kpiMoveUp} disabled={index === 0} onClick={() => void reorderWidget(widget.widgetId, orderedWidgets[index - 1].widgetId)}>↑</button>
+                          <button className="kpi-icon-button" type="button" aria-label={m.kpiMoveDown} title={m.kpiMoveDown} disabled={index === orderedWidgets.length - 1} onClick={() => void reorderWidget(widget.widgetId, orderedWidgets[index + 1].widgetId)}>↓</button>
                           <button className="kpi-icon-button is-danger" type="button" aria-label={m.kpiDeleteWidget} title={m.kpiDeleteWidget} onClick={() => void removeWidget(widget)}>×</button>
                         </div>}
                       </div>

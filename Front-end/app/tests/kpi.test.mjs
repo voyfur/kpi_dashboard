@@ -51,3 +51,16 @@ test('series validation guidance distinguishes row count, cadence, and unit limi
   assert.match(i18n.getKpiSeriesValidationMessage(i18n.messages.ru, 'units'), /не более двух.*отдельный график/);
   assert.match(i18n.getKpiSeriesValidationMessage(i18n.messages.uk, 'units'), /не більше двох.*окремий графік/);
 });
+
+test('moving a widget assigns contiguous sort orders to every widget', () => {
+  const widgets = [
+    { widgetId: 'first', sortOrder: 0 },
+    { widgetId: 'second', sortOrder: 1 },
+    { widgetId: 'third', sortOrder: 2 },
+  ];
+  assert.deepEqual(kpi.moveKpiWidget(widgets, 'first', 'second'), [
+    { widgetId: 'second', sortOrder: 0 },
+    { widgetId: 'first', sortOrder: 1 },
+    { widgetId: 'third', sortOrder: 2 },
+  ]);
+});
