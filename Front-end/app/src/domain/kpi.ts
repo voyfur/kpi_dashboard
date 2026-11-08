@@ -1,0 +1,47 @@
+export type KpiSeriesConfig = { cadence: string; unit: string };
+
+export function getNumericExtent(values: readonly (string | null)[]): [number, number] | null {
+  const numbers = values
+    .map(parseKpiNumber)
+    .filter((value): value is number => value !== null);
+  if (numbers.length === 0) return null;
+
+  let minimum = Math.min(...numbers);
+  let maximum = Math.max(...numbers);
+  if (minimum === maximum) {
+    const padding = Math.abs(minimum) * 0.05 || 1;
+    minimum -= padding;
+    maximum += padding;
+  }
+  return [minimum, maximum];
+}
+
+export function splitKpiLineSegments(
+  points: readonly { value: string | null }[],
+): number[][] {
+  const segments: number[][] = [];
+  let current: number[] = [];
+  points.forEach((point, index) => {
+    if (parseKpiNumber(point.value) === null) {
+      if (current.length > 0) segments.push(current);
+      current = [];
+      return;
+    }
+    current.push(index);
+  });
+  if (current.length > 0) segments.push(current);
+  return segments;
+}
+
+export function validateKpiSeries(series: readonly KpiSeriesConfig[]): 'series-count' | 'cadence' | 'units' | null {
+  if (series.length < 2 || series.length > 4) return 'series-count';
+  if (new Set(series.map((item) => item.cadence)).size !== 1) return 'cadence';
+  if (new Set(series.map((item) => item.unit)).size > 2) return 'units';
+  return null;
+}
+
+export function parseKpiNumber(value: string | null): number | null {
+  if (value === null || value.trim() === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}

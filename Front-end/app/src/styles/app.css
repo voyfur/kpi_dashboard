@@ -1,0 +1,59 @@
+@import './tokens.css';
+@import './kpi.css';
+
+* { box-sizing: border-box; }
+
+html, body, #root { min-width: 320px; min-height: 100%; margin: 0; }
+body { color: #172331; background: #f4f7fb; font-family: var(--font-ui); font-size: 14px; line-height: 1.5; }
+button, input, select, textarea { font: inherit; }
+
+.standalone-header {
+  display: flex;
+  min-height: 64px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 0 28px;
+  border-bottom: 1px solid #dfe5ec;
+  background: #fff;
+}
+.standalone-brand { display: inline-flex; align-items: center; gap: 10px; color: #172331; font-size: 0.9rem; font-weight: 650; text-decoration: none; }
+.standalone-brand-mark { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 9px; color: #fff; background: #1d67bd; font-size: 0.86rem; font-weight: 800; }
+.standalone-brand-divider { color: #a1acb7; }
+.standalone-brand strong { color: #516478; font-size: 0.84rem; font-weight: 600; }
+.standalone-account { display: flex; align-items: center; gap: 12px; }
+.standalone-account select { height: 34px; padding: 0 8px; border: 1px solid #d5dde5; border-radius: 7px; color: #41576a; background: #fff; }
+.standalone-user { max-width: min(32vw, 320px); overflow: hidden; color: #52677a; text-overflow: ellipsis; white-space: nowrap; }
+.standalone-logout { min-height: 34px; }
+.standalone-main { max-width: 1640px; margin: 0 auto; padding: 28px 32px 64px; }
+.standalone-alert { margin: 12px 32px 0; padding: 9px 12px; border: 1px solid #efc1be; border-radius: 8px; color: #94342d; background: #fff5f4; }
+
+.button { display: inline-flex; min-height: 36px; align-items: center; justify-content: center; padding: 0 13px; border: 1px solid #bdc9d5; border-radius: 7px; color: #263b50; background: #fff; font-size: 0.82rem; font-weight: 650; cursor: pointer; }
+.button:hover:not(:disabled) { border-color: #8eb7e4; background: #f4f8fc; }
+.button:disabled { cursor: not-allowed; opacity: 0.65; }
+.button-secondary { color: #245b91; background: #edf5fc; }
+.section-kicker, .eyebrow { color: #647687; font-size: 0.68rem; font-weight: 750; letter-spacing: 0.1em; text-transform: uppercase; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
+
+.auth-status { display: grid; min-height: 100vh; place-items: center; color: #617181; }
+.login-page { display: grid; min-height: 100vh; place-items: center; padding: 24px; background: radial-gradient(circle at 50% 0%, #e7f0f9 0, transparent 40%), #f4f7fb; }
+.login-card { width: min(100%, 410px); padding: 30px; border: 1px solid #dfe5ec; border-radius: 16px; background: #fff; box-shadow: 0 14px 40px rgb(33 56 78 / 9%); }
+.standalone-brand-login { margin-bottom: 30px; }
+.login-card h1 { margin: 7px 0 4px; color: #172331; font-size: 1.65rem; letter-spacing: -0.03em; }
+.login-card > p { margin: 0 0 22px; color: #617181; }
+.login-form { display: grid; gap: 15px; }
+.login-form label { display: grid; gap: 6px; color: #42576a; font-size: 0.82rem; font-weight: 650; }
+.login-form input { min-height: 42px; padding: 0 11px; border: 1px solid #cfd8e1; border-radius: 8px; color: #172331; background: #fff; }
+.login-form input:focus { outline: 3px solid rgb(29 103 189 / 16%); border-color: #4b8dcc; }
+.login-submit { min-height: 42px; margin-top: 2px; border-color: #1d67bd; color: #fff; background: #1d67bd; }
+.login-submit:hover:not(:disabled) { color: #fff; background: #15589f; }
+.login-error, .login-notice { margin: 0; color: #a33b34; font-size: 0.82rem; }
+.login-notice { display: flex; justify-content: space-between; gap: 10px; margin: 14px 0; padding: 10px; border: 1px solid #efc1be; border-radius: 8px; background: #fff5f4; }
+
+@media (max-width: 700px) {
+  .standalone-header { align-items: flex-start; flex-direction: column; gap: 12px; padding: 13px 16px; }
+  .standalone-account { width: 100%; justify-content: space-between; }
+  .standalone-user { max-width: 42vw; }
+  .standalone-main { padding: 19px 14px 40px; }
+  .standalone-alert { margin-right: 14px; margin-left: 14px; }
+}

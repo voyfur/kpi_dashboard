@@ -1,0 +1,26 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Python
+**/.venv/
+**/__pycache__/
+**/*.egg-info/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+**/.coverage
+**/coverage.xml
+
+# Frontend
+**/node_modules/
+**/dist/
+**/.vite/
+**/.vite-temp/
+
+# Local browser and editor artifacts
+.playwright-cli/
+.DS_Store
+*.log

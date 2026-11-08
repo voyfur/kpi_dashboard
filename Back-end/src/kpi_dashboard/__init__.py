@@ -1,0 +1,1 @@
+"""Standalone KPI dashboards application."""
