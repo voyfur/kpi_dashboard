@@ -1,4 +1,5 @@
 import type { Locale } from '../domain/types';
+import type { KpiSeriesValidation } from '../domain/kpi';
 
 const en = {
   product: 'LNG Holding',
@@ -756,6 +757,9 @@ const en = {
   kpiAxisLeft: 'Left axis',
   kpiAxisRight: 'Right axis',
   kpiSelectTwoSeries: 'A chart needs two to four series with the same period.',
+  kpiSeriesCountError: 'Choose two to four series for this chart.',
+  kpiSeriesCadenceError: 'All series in a chart must use the same period.',
+  kpiSeriesUnitsError: 'A chart can contain at most two units of measure. Create a separate chart for a third unit.',
   kpiInvalidRange: 'End date must be on or after the start date.',
   applicationVersion: 'Application version',} as const;
 
@@ -1516,6 +1520,9 @@ const ru: MessageShape = {
   kpiAxisLeft: 'Левая ось',
   kpiAxisRight: 'Правая ось',
   kpiSelectTwoSeries: 'Для графика нужны от двух до четырёх рядов с одной периодичностью.',
+  kpiSeriesCountError: 'Для графика выберите от двух до четырёх рядов.',
+  kpiSeriesCadenceError: 'Для всех рядов графика выберите одну периодичность.',
+  kpiSeriesUnitsError: 'В одном графике может быть не более двух единиц измерения. Для третьей единицы создайте отдельный график.',
   kpiInvalidRange: 'Конец периода должен быть не раньше начала.',
   applicationVersion: 'Версия приложения',
 };
@@ -2275,9 +2282,18 @@ const uk: MessageShape = {
   kpiAxisLeft: 'Ліва вісь',
   kpiAxisRight: 'Права вісь',
   kpiSelectTwoSeries: 'Для графіка потрібно від двох до чотирьох рядів з однією періодичністю.',
+  kpiSeriesCountError: 'Для графіка виберіть від двох до чотирьох рядів.',
+  kpiSeriesCadenceError: 'Для всіх рядів графіка виберіть одну періодичність.',
+  kpiSeriesUnitsError: 'В одному графіку може бути не більше двох одиниць вимірювання. Для третьої одиниці створіть окремий графік.',
   kpiInvalidRange: 'Кінець діапазону має бути не раніше початку.',
   applicationVersion: 'Версія застосунку',
 };
 
 export const messages: Record<Locale, MessageShape> = { en, ru, uk };
 export type Messages = MessageShape;
+
+export function getKpiSeriesValidationMessage(messageSet: Messages, validation: KpiSeriesValidation): string {
+  if (validation === 'series-count') return messageSet.kpiSeriesCountError;
+  if (validation === 'cadence') return messageSet.kpiSeriesCadenceError;
+  return messageSet.kpiSeriesUnitsError;
+}

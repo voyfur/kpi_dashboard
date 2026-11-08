@@ -1,4 +1,10 @@
 export type KpiSeriesConfig = { cadence: string; unit: string };
+export type KpiDraftStatus = 'dirty' | 'saving' | 'saved' | 'error' | 'conflict';
+export type KpiSeriesValidation = 'series-count' | 'cadence' | 'units';
+
+export function canApplyServerKpiPointUpdate(status?: KpiDraftStatus): boolean {
+  return status === undefined || status === 'saved';
+}
 
 export function getNumericExtent(values: readonly (string | null)[]): [number, number] | null {
   const numbers = values
@@ -33,7 +39,7 @@ export function splitKpiLineSegments(
   return segments;
 }
 
-export function validateKpiSeries(series: readonly KpiSeriesConfig[]): 'series-count' | 'cadence' | 'units' | null {
+export function validateKpiSeries(series: readonly KpiSeriesConfig[]): KpiSeriesValidation | null {
   if (series.length < 2 || series.length > 4) return 'series-count';
   if (new Set(series.map((item) => item.cadence)).size !== 1) return 'cadence';
   if (new Set(series.map((item) => item.unit)).size > 2) return 'units';

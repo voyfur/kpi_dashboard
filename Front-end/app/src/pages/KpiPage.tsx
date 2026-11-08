@@ -25,11 +25,11 @@ import {
   type KpiWidget,
   type KpiWidgetSeries,
 } from '../data/kpiRepository';
-import { getNumericExtent, parseKpiNumber, splitKpiLineSegments, validateKpiSeries } from '../domain/kpi';
+import { canApplyServerKpiPointUpdate, getNumericExtent, parseKpiNumber, splitKpiLineSegments, validateKpiSeries, type KpiDraftStatus } from '../domain/kpi';
 import { useLocale } from '../i18n/LocaleProvider';
-import type { Messages } from '../i18n/messages';
+import { getKpiSeriesValidationMessage, type Messages } from '../i18n/messages';
 
-type SaveState = 'dirty' | 'saving' | 'saved' | 'error' | 'conflict';
+type SaveState = KpiDraftStatus;
 type CellDraft = {
   value: string;
   comment: string;
@@ -119,6 +119,7 @@ export function KpiPage() {
   const savingCells = useRef(new Set<string>());
   const editsDuringSave = useRef(new Map<string, CellDraft>());
   const loadSequence = useRef(0);
+  const pollInFlight = useRef(false);
   const dashboardIdRef = useRef(dashboardId);
   dashboardIdRef.current = dashboardId;
   const valueChangesChannel = useRef<BroadcastChannel | null>(null);
@@ -139,11 +140,45 @@ export function KpiPage() {
     [selectedSeriesIds, seriesChoices],
   );
   const seriesValidation = validateKpiSeries(selectedChoices);
+  const widgetEditValidation = validateKpiSeries(widgetSeriesDraft.map((id) => seriesChoices.find((item) => item.seriesId === id)).filter((item): item is SeriesChoice => Boolean(item)));
   const hasUnsavedCells = Object.values(drafts).some((draft) => draft.status !== 'saved');
 
   const handleRequestError = useCallback((error: unknown) => {
     if (error instanceof ApiRequestError && error.status === 401) markUnauthenticated();
   }, [markUnauthenticated]);
+
+  const syncSavedDrafts = useCallback((next: KpiDashboard) => {
+    const serverPoints = new Map<string, KpiPoint>();
+    next.widgets.forEach((widget) => widget.series.forEach((series) => series.points.forEach((point) => {
+      serverPoints.set(cellKey(series.seriesId, point.periodStart), point);
+    })));
+    const current = draftsRef.current;
+    let changed = false;
+    const reconciled = { ...current };
+    Object.entries(current).forEach(([key, draft]) => {
+      if (!canApplyServerKpiPointUpdate(draft.status)) return;
+      const point = serverPoints.get(key);
+      if (!point) return;
+      const updated: CellDraft = {
+        ...draft,
+        value: point.value ?? '',
+        comment: point.comment ?? '',
+        expectedUpdatedAt: point.updatedAt,
+        latestServerValue: undefined,
+        latestServerComment: undefined,
+        status: 'saved',
+      };
+      if (draft.value === updated.value && draft.comment === updated.comment
+        && draft.expectedUpdatedAt === updated.expectedUpdatedAt
+        && draft.latestServerValue === undefined && draft.latestServerComment === undefined) return;
+      reconciled[key] = updated;
+      changed = true;
+    });
+    if (changed) {
+      draftsRef.current = reconciled;
+      setDrafts(reconciled);
+    }
+  }, []);
 
   const refreshWorkspace = useCallback(async () => {
     try {
@@ -163,28 +198,33 @@ export function KpiPage() {
     }
   }, [handleRequestError]);
 
-  const refreshDashboard = useCallback(async (id: string) => {
+  const refreshDashboard = useCallback(async (id: string, options: { quiet?: boolean } = {}) => {
     const sequence = ++loadSequence.current;
-    setDashboardState('loading');
+    if (!options.quiet) setDashboardState('loading');
     try {
       const next = await loadKpiDashboard(id);
       if (loadSequence.current !== sequence) return null;
+      syncSavedDrafts(next);
       setDashboard(next);
-      setDashboardNameDraft(next.name);
-      setDashboardDescriptionDraft(next.description ?? '');
-      setRangeStart(next.rangeStart ?? '');
-      setRangeEnd(next.rangeEnd ?? '');
+      if (!options.quiet) {
+        setDashboardNameDraft(next.name);
+        setDashboardDescriptionDraft(next.description ?? '');
+        setRangeStart(next.rangeStart ?? '');
+        setRangeEnd(next.rangeEnd ?? '');
+        setDashboardState('ready');
+      }
       setDashboardError(false);
-      setDashboardState('ready');
       return next;
     } catch (error) {
       if (loadSequence.current !== sequence) return null;
       handleRequestError(error);
-      setDashboardError(true);
-      setDashboardState('error');
+      if (!options.quiet) {
+        setDashboardError(true);
+        setDashboardState('error');
+      }
       return null;
     }
-  }, [handleRequestError]);
+  }, [handleRequestError, syncSavedDrafts]);
 
   useEffect(() => {
     void refreshWorkspace();
@@ -200,7 +240,7 @@ export function KpiPage() {
       applySavedPoint(update.seriesId, update.periodStart, update.value, update.comment, update.updatedAt);
       const key = cellKey(update.seriesId, update.periodStart);
       const current = draftsRef.current[key];
-      if (!current || current.status === 'saved') {
+      if (canApplyServerKpiPointUpdate(current?.status)) {
         setCellDraft(key, {
           value: update.value ?? '',
           comment: update.comment ?? '',
@@ -242,6 +282,18 @@ export function KpiPage() {
       setDashboardState('idle');
     }
   }, [dashboardId, refreshDashboard]);
+
+  useEffect(() => {
+    if (!dashboardId || dashboardState !== 'ready') return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== 'visible' || pollInFlight.current) return;
+      pollInFlight.current = true;
+      void refreshDashboard(dashboardId, { quiet: true }).finally(() => {
+        pollInFlight.current = false;
+      });
+    }, 10_000);
+    return () => window.clearInterval(timer);
+  }, [dashboardId, dashboardState, refreshDashboard]);
 
   useEffect(() => () => {
     draftSaveTimers.current.forEach((timer) => window.clearTimeout(timer));
@@ -950,7 +1002,7 @@ export function KpiPage() {
                           </label>
                         ))}
                       </div>
-                      {seriesValidation !== null && <span className="kpi-field-error">{m.kpiSelectTwoSeries}</span>}
+                      {seriesValidation !== null && <span className="kpi-field-error">{getKpiSeriesValidationMessage(m, seriesValidation)}</span>}
                       {widgetError && <span className="kpi-field-error" role="alert">{m.kpiCreateError}</span>}
                       <button className="button" type="submit" disabled={widgetSaving || seriesValidation !== null}>{widgetSaving ? m.kpiCreating : m.kpiAddChart}</button>
                     </form>
@@ -1029,9 +1081,9 @@ export function KpiPage() {
                             <span><strong>{choice.label}</strong><small>{choice.definitionName} · {choice.unit} · {choice.cadence}</small></span>
                           </label>)}
                         </div>
-                        {validateKpiSeries(widgetSeriesDraft.map((id) => seriesChoices.find((item) => item.seriesId === id)).filter((item): item is SeriesChoice => Boolean(item))) !== null && <span className="kpi-field-error">{m.kpiSelectTwoSeries}</span>}
+                        {widgetEditValidation !== null && <span className="kpi-field-error">{getKpiSeriesValidationMessage(m, widgetEditValidation)}</span>}
                         {widgetEditError && <span className="kpi-field-error" role="alert">{m.kpiEditError}</span>}
-                        <div className="kpi-form-row"><button className="button" type="submit" disabled={widgetEditSaving}>{widgetEditSaving ? m.kpiSaving : m.kpiSaveChanges}</button><button className="kpi-text-button" type="button" onClick={() => setEditingWidgetId(null)}>{m.kpiCancelEdit}</button></div>
+                        <div className="kpi-form-row"><button className="button" type="submit" disabled={widgetEditSaving || widgetEditValidation !== null}>{widgetEditSaving ? m.kpiSaving : m.kpiSaveChanges}</button><button className="kpi-text-button" type="button" onClick={() => setEditingWidgetId(null)}>{m.kpiCancelEdit}</button></div>
                       </form>}
                       <KpiChart widget={widget} locale={locale} emptyLabel={m.kpiNoValues} currentLabel={m.kpiCurrentPeriod} leftLabel={m.kpiAxisLeft} rightLabel={m.kpiAxisRight} />
                       <KpiValueTable
