@@ -24,3 +24,17 @@
 - Проверки: frontend `npm run typecheck` и `npm run build`, Python `py_compile` для схемы/API и `git diff --check` прошли. Автоматические тесты не запускались.
 - Docker Compose пересобрал frontend и API из активного checkout. PostgreSQL контейнер и именованный volume остались на месте; после пересборки локальная сессия браузера завершилась.
 - GitHub `voyfur/kpi_dashboard` проверен: репозиторий пустой, веток и коммитов пока нет. Пользователь поручил опубликовать изменения после завершения работы.
+
+## [2026-11-11] session-log | Публикация изменений и сведение веток
+
+- В `main` опубликованы подсказки комментариев точек, копирование/вставка виджетов и размещение подписи moving average вне потока легенды; исходный tooltip комментария уже присутствовал в активной реализации.
+- Push в `https://github.com/voyfur/kpi_dashboard`: коммит `c209285`. Проверка GitHub подтвердила SHA и единственную удалённую ветку `main`; локальные feature-ветки удалены после проверки ancestry.
+- Старая и временная рабочие копии оставлены detached, чтобы сохранить их содержимое. Старая копия сравнивалась с опубликованной: большинство файлов совпадает; различия находятся в более ранних вариантах семи source/docs файлов и остаются сохранёнными локально.
+- Проверки: `npm run typecheck`, `npm run build`, Python `py_compile` для изменённых API-файлов и `git diff --check` прошли. Автоматические тестовые наборы не запускались.
+- Ручной UI-check не завершён: после пересборки API браузер разлогинился; среда браузера также не передала буфер для проверки Cmd/Ctrl+C/V. В `backlog.md` оставлены проверки после повторного входа.
+
+## [2026-11-11] session | Implement and publish KPI chart comments, widget copy/paste, and moving-average label layout; consolidate branches
+
+- Raw: `raw/sessions/2026-11-11-implement-and-publish-kpi-chart-comments-widget-.md`
+- Tags: `activity:implementation`, `task:kpi-widget-copy-paste`, `file:Front-end/app/src/pages/KpiPage.tsx`, `file:Front-end/app/src/styles/kpi.css`, `file:wiki/progress.md`
+- Status: `completed`

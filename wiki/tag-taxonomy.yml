@@ -1,0 +1,16 @@
+schema_version: 2
+session:
+  activity: [research, implementation, debugging, refactoring, documentation, testing, planning, review, configuration]
+  status: [completed, partial, needs-review, blocked, abandoned]
+content:
+  type: [skill, article, repository, tool, project, entity, concept, source, synthesis, question, image, diagram, document]
+  status: [active, draft, archived, superseded]
+  relations: [related-to, complements, depends-on, derived-from, applies-to, replaces, replaced-by, references, contains, describes, supports]
+namespaces: [domain, capability, workflow, topic, tool, platform, language, project, task, activity, component, file, decision, status, source, person]
+
+inverse_relation_rules:
+  complements: {kind: symmetric, reverse_type: complements}
+  related-to: {kind: symmetric, reverse_type: related-to, status: legacy-supported}
+  replaces: {kind: reciprocal, reverse_type: replaced-by}
+  replaced-by: {kind: reciprocal, reverse_type: replaces}
+  directed: [depends-on, derived-from, applies-to, contains, describes, supports, references]
