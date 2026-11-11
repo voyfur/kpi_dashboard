@@ -29,7 +29,7 @@ Compose-БД изначально создана пустой. На послед
 
 ## GitHub и рабочие копии
 
-- Репозиторий `https://github.com/voyfur/kpi_dashboard`; опубликованный коммит `c209285` (`Complete KPI dashboard and local development stack`). Локальная `main` отслеживает `origin/main`; на GitHub и локально осталась одна ветка — `main`.
+- Репозиторий `https://github.com/voyfur/kpi_dashboard`; реализация приложения опубликована в коммите `c209285`, последующие коммиты на `main` фиксируют Wiki и handoff. Локальная `main` отслеживает `origin/main`; на GitHub и локально осталась одна ветка — `main`.
 - Исторические ветки удалены после проверки, что их коммиты входят в опубликованную историю. Две прежние рабочие копии оставлены отсоединёнными от веток, чтобы сохранить локальные файлы; старую копию не очищать без отдельной проверки.
 - Продолжать разработку в `/Users/anatoly/.codex/worktrees/smooth-kpi-widget-dragging/KPI Dashboards`.
 - Для деталей реализации сетки см. [план](../docs/superpowers/plans/2026-11-10-smooth-kpi-widget-dragging.md).

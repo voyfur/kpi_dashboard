@@ -38,3 +38,9 @@
 - Raw: `raw/sessions/2026-11-11-implement-and-publish-kpi-chart-comments-widget-.md`
 - Tags: `activity:implementation`, `task:kpi-widget-copy-paste`, `file:Front-end/app/src/pages/KpiPage.tsx`, `file:Front-end/app/src/styles/kpi.css`, `file:wiki/progress.md`
 - Status: `completed`
+
+## [2026-11-11] session | Update KPI project Wiki and AGENTS.md with GitHub source and local credential locations
+
+- Raw: `raw/sessions/2026-11-11-update-kpi-project-wiki-and-agents-md-with-githu.md`
+- Tags: `activity:documentation`, `task:kpi-project-wiki`, `component:local-development`, `file:AGENTS.md`, `file:wiki/index.md`, `file:wiki/local-development.md`, `file:wiki/progress.md`
+- Status: `completed`
