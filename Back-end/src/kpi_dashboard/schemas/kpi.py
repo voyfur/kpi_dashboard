@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
+import re
 from typing import Literal
 import uuid
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-Cadence = Literal["week", "month", "year"]
+Cadence = Literal["hour", "day", "week", "month", "year"]
+DepartmentColor = Literal["blue", "teal", "green", "amber", "rose", "violet"] | None
 
 
 class KpiRequest(BaseModel):
@@ -19,6 +21,9 @@ class KpiRequest(BaseModel):
 
 class CreateDepartmentRequest(KpiRequest):
     name: str = Field(min_length=1, max_length=120)
+    emoji: str | None = Field(default=None, max_length=16)
+    color: DepartmentColor = None
+    parent_department_id: uuid.UUID | None = Field(default=None, alias="parentDepartmentId")
     sort_order: int = Field(default=0, alias="sortOrder", ge=0)
 
     @field_validator("name")
@@ -26,15 +31,37 @@ class CreateDepartmentRequest(KpiRequest):
     def trim_name(cls, value: str) -> str:
         return value.strip()
 
+    @field_validator("emoji")
+    @classmethod
+    def trim_emoji(cls, value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
+
 
 class UpdateDepartmentRequest(KpiRequest):
     name: str | None = Field(default=None, min_length=1, max_length=120)
+    emoji: str | None = Field(default=None, max_length=16)
+    color: DepartmentColor = None
+    parent_department_id: uuid.UUID | None = Field(default=None, alias="parentDepartmentId")
     sort_order: int | None = Field(default=None, alias="sortOrder", ge=0)
 
     @field_validator("name")
     @classmethod
     def trim_name(cls, value: str | None) -> str | None:
         return value.strip() if value is not None else None
+
+    @field_validator("emoji")
+    @classmethod
+    def trim_emoji(cls, value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
+
+
+class DeleteDepartmentRequest(KpiRequest):
+    confirmation_name: str = Field(alias="confirmationName", min_length=1, max_length=120)
+
+    @field_validator("confirmation_name")
+    @classmethod
+    def trim_confirmation_name(cls, value: str) -> str:
+        return value.strip()
 
 
 class CreateDashboardRequest(KpiRequest):
@@ -76,7 +103,7 @@ class CreateDefinitionRequest(KpiRequest):
     unit: str = Field(min_length=1, max_length=64)
     precision: int = Field(default=0, ge=0, le=8)
     cadence: Cadence
-    series_labels: list[str] = Field(default_factory=list, alias="seriesLabels", max_length=4)
+    series_labels: list[str] = Field(default_factory=list, alias="seriesLabels", max_length=10)
 
     @field_validator("name", "unit")
     @classmethod
@@ -131,13 +158,25 @@ class SeriesChoice(KpiRequest):
 class CreateWidgetRequest(KpiRequest):
     title: str = Field(min_length=1, max_length=160)
     description: str | None = Field(default=None, max_length=4000)
-    series_ids: list[uuid.UUID] = Field(alias="seriesIds", min_length=2, max_length=4)
+    series_ids: list[uuid.UUID] = Field(alias="seriesIds", min_length=1, max_length=10)
     period_count: int = Field(default=8, alias="periodCount", ge=1, le=60)
     grid_x: int = Field(default=0, alias="gridX", ge=0, le=11)
     grid_y: int = Field(default=0, alias="gridY", ge=0)
     grid_width: int = Field(default=6, alias="gridWidth", ge=3, le=12)
     grid_height: int = Field(default=4, alias="gridHeight", ge=2, le=12)
+    show_linear_trend: bool = Field(default=False, alias="showLinearTrend")
+    show_moving_average: bool = Field(default=False, alias="showMovingAverage")
     series: list[SeriesChoice] | None = None
+    series_colors: dict[uuid.UUID, str | None] | None = Field(default=None, alias="seriesColors")
+
+    @field_validator("series_colors")
+    @classmethod
+    def validate_series_colors(cls, value: dict[uuid.UUID, str | None] | None) -> dict[uuid.UUID, str | None] | None:
+        if value is None:
+            return None
+        if any(color is not None and re.fullmatch(r"#[0-9a-fA-F]{6}", color) is None for color in value.values()):
+            raise ValueError("seriesColors values must be six-digit hex colors or null")
+        return {series_id: color.lower() if color is not None else None for series_id, color in value.items()}
 
     @field_validator("title")
     @classmethod
@@ -150,13 +189,15 @@ class CreateWidgetRequest(KpiRequest):
             raise ValueError("seriesIds must be unique")
         if self.series is not None and {item.series_id for item in self.series} != set(self.series_ids):
             raise ValueError("series must match seriesIds")
+        if self.series_colors is not None and not set(self.series_colors).issubset(self.series_ids):
+            raise ValueError("seriesColors must match seriesIds")
         return self
 
 
 class UpdateWidgetRequest(KpiRequest):
     title: str | None = Field(default=None, min_length=1, max_length=160)
     description: str | None = Field(default=None, max_length=4000)
-    series_ids: list[uuid.UUID] | None = Field(default=None, alias="seriesIds", min_length=2, max_length=4)
+    series_ids: list[uuid.UUID] | None = Field(default=None, alias="seriesIds", min_length=1, max_length=10)
     series: list[SeriesChoice] | None = None
     sort_order: int | None = Field(default=None, alias="sortOrder", ge=0)
     grid_x: int | None = Field(default=None, alias="gridX", ge=0, le=11)
@@ -164,6 +205,18 @@ class UpdateWidgetRequest(KpiRequest):
     grid_width: int | None = Field(default=None, alias="gridWidth", ge=3, le=12)
     grid_height: int | None = Field(default=None, alias="gridHeight", ge=2, le=12)
     period_count: int | None = Field(default=None, alias="periodCount", ge=1, le=60)
+    show_linear_trend: bool | None = Field(default=None, alias="showLinearTrend")
+    show_moving_average: bool | None = Field(default=None, alias="showMovingAverage")
+    series_colors: dict[uuid.UUID, str | None] | None = Field(default=None, alias="seriesColors")
+
+    @field_validator("series_colors")
+    @classmethod
+    def validate_series_colors(cls, value: dict[uuid.UUID, str | None] | None) -> dict[uuid.UUID, str | None] | None:
+        if value is None:
+            return None
+        if any(color is not None and re.fullmatch(r"#[0-9a-fA-F]{6}", color) is None for color in value.values()):
+            raise ValueError("seriesColors values must be six-digit hex colors or null")
+        return {series_id: color.lower() if color is not None else None for series_id, color in value.items()}
 
     @field_validator("title")
     @classmethod
@@ -200,7 +253,10 @@ class DeleteValueRequest(KpiRequest):
 class DepartmentView(KpiRequest):
     department_id: uuid.UUID = Field(alias="departmentId")
     name: str
+    emoji: str | None = None
+    color: DepartmentColor = None
     sort_order: int = Field(alias="sortOrder")
+    parent_department_id: uuid.UUID | None = Field(default=None, alias="parentDepartmentId")
 
 
 class DashboardListView(KpiRequest):
@@ -223,7 +279,7 @@ class DefinitionView(KpiRequest):
 
 
 class ValuePointView(KpiRequest):
-    period_start: date = Field(alias="periodStart")
+    period_start: datetime | date = Field(alias="periodStart")
     value: str | None
     comment: str | None
     updated_at: datetime | None = Field(alias="updatedAt")
@@ -239,6 +295,7 @@ class WidgetSeriesView(KpiRequest):
     cadence: Cadence
     label: str
     axis_side: Literal["left", "right"] = Field(alias="axisSide")
+    color: str | None = None
     points: list[ValuePointView]
 
 
@@ -253,7 +310,9 @@ class WidgetView(KpiRequest):
     grid_width: int = Field(alias="gridWidth")
     grid_height: int = Field(alias="gridHeight")
     period_count: int = Field(alias="periodCount")
-    periods: list[date]
+    show_linear_trend: bool = Field(alias="showLinearTrend")
+    show_moving_average: bool = Field(alias="showMovingAverage")
+    periods: list[datetime | date]
     series: list[WidgetSeriesView]
 
 

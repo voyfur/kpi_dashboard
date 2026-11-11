@@ -13,6 +13,7 @@ from kpi_dashboard.auth import (
     AuthRateLimited,
     AuthServiceUnavailable,
     DashboardAuthProvider,
+    LocalDevelopmentAuthProvider,
     UnavailableAuthProvider,
 )
 from kpi_dashboard.config import Settings, load_settings
@@ -43,6 +44,15 @@ def create_app(
 
     if auth_provider is not None:
         process_auth_provider = auth_provider
+    elif process_settings.dev_auth_email is not None or process_settings.dev_auth_password is not None:
+        if process_settings.app_env != "development":
+            raise RuntimeError("local development authentication is only available when KPI_ENV=development")
+        if not process_settings.dev_auth_email or not process_settings.dev_auth_password:
+            raise RuntimeError("KPI_DEV_AUTH_EMAIL and KPI_DEV_AUTH_PASSWORD must both be configured")
+        process_auth_provider = LocalDevelopmentAuthProvider(
+            process_settings.dev_auth_email,
+            process_settings.dev_auth_password,
+        )
     elif process_settings.dashboard_auth_api_url and process_settings.dashboard_public_url:
         process_auth_provider = DashboardAuthProvider(
             process_settings.dashboard_auth_api_url,

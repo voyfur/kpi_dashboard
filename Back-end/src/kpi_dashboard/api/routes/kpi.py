@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Any
 import uuid
 
-from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
@@ -26,6 +26,7 @@ from kpi_dashboard.schemas.kpi import (
     CreateDashboardRequest,
     CreateDefinitionRequest,
     CreateDepartmentRequest,
+    DeleteDepartmentRequest,
     CreateSeriesRequest,
     CreateWidgetRequest,
     DashboardDetailView,
@@ -45,10 +46,12 @@ from kpi_dashboard.schemas.kpi import (
 )
 from kpi_dashboard.periods import (
     Cadence,
+    PeriodStart,
     current_period_start,
     intersecting_period_starts,
     last_period_starts,
     period_start_for,
+    storage_period_start,
 )
 
 
@@ -102,7 +105,10 @@ def list_departments(
             **DepartmentView(
                 departmentId=department.department_id,
                 name=department.name,
+                emoji=department.emoji,
+                color=department.color,
                 sortOrder=department.sort_order,
+                parentDepartmentId=department.parent_department_id,
             ).model_dump(by_alias=True),
             "dashboards": [
                 dashboard.model_dump(by_alias=True)
@@ -127,13 +133,24 @@ def create_department(
     if not payload.name:
         raise ApiError(400, "invalid_request")
     with _factory(request)() as session, session.begin():
-        department = KpiDepartment(name=payload.name, sort_order=payload.sort_order)
+        if payload.parent_department_id is not None:
+            _required(session, KpiDepartment, payload.parent_department_id, "parent_department_id")
+        department = KpiDepartment(
+            name=payload.name,
+            emoji=payload.emoji,
+            color=payload.color,
+            parent_department_id=payload.parent_department_id,
+            sort_order=payload.sort_order,
+        )
         session.add(department)
         session.flush()
         result = DepartmentView(
             departmentId=department.department_id,
             name=department.name,
+            emoji=department.emoji,
+            color=department.color,
             sortOrder=department.sort_order,
+            parentDepartmentId=department.parent_department_id,
         )
     return result
 
@@ -146,23 +163,101 @@ def update_department(
     _admin=Depends(require_admin),
     _csrf: None = Depends(require_same_origin_json),
 ) -> DepartmentView:
-    if not payload.model_fields_set or (payload.name is None and payload.sort_order is None):
+    if not payload.model_fields_set:
         raise ApiError(400, "invalid_request")
-    if payload.name is not None and not payload.name:
+    if "name" in payload.model_fields_set and not payload.name:
         raise ApiError(400, "invalid_request")
     with _factory(request)() as session, session.begin():
         department = _required(session, KpiDepartment, department_id, "department_id")
+        if payload.parent_department_id is not None:
+            parent = _required(session, KpiDepartment, payload.parent_department_id, "parent_department_id")
+            visited: set[uuid.UUID] = set()
+            while parent is not None:
+                if parent.department_id == department_id:
+                    raise ApiError(400, "invalid_department_parent")
+                if parent.department_id in visited:
+                    raise ApiError(409, "invalid_department_hierarchy")
+                visited.add(parent.department_id)
+                parent = session.get(KpiDepartment, parent.parent_department_id) if parent.parent_department_id else None
         if payload.name is not None:
             department.name = payload.name
+        if "emoji" in payload.model_fields_set:
+            department.emoji = payload.emoji
+        if "color" in payload.model_fields_set:
+            department.color = payload.color
         if payload.sort_order is not None:
             department.sort_order = payload.sort_order
+        if "parent_department_id" in payload.model_fields_set:
+            department.parent_department_id = payload.parent_department_id
         session.flush()
         result = DepartmentView(
             departmentId=department.department_id,
             name=department.name,
+            emoji=department.emoji,
+            color=department.color,
             sortOrder=department.sort_order,
+            parentDepartmentId=department.parent_department_id,
         )
     return result
+
+
+@router.delete("/departments/{department_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_department(
+    department_id: uuid.UUID,
+    payload: DeleteDepartmentRequest,
+    request: Request,
+    _admin=Depends(require_admin),
+    _csrf: None = Depends(require_same_origin_json),
+) -> Response:
+    with _factory(request)() as session, session.begin():
+        department = _required(session, KpiDepartment, department_id, "department_id")
+        if payload.confirmation_name != department.name:
+            raise ApiError(400, "department_name_mismatch")
+
+        department_ids: list[uuid.UUID] = []
+        pending = [department_id]
+        seen: set[uuid.UUID] = set()
+        while pending:
+            current_id = pending.pop()
+            if current_id in seen:
+                continue
+            seen.add(current_id)
+            department_ids.append(current_id)
+            pending.extend(session.scalars(
+                select(KpiDepartment.department_id)
+                .where(KpiDepartment.parent_department_id == current_id)
+            ).all())
+
+        dashboard_ids = session.scalars(
+            select(KpiDashboard.dashboard_id)
+            .where(KpiDashboard.department_id.in_(department_ids))
+        ).all()
+        widget_ids = session.scalars(
+            select(KpiDashboardWidget.widget_id)
+            .where(KpiDashboardWidget.dashboard_id.in_(dashboard_ids))
+        ).all() if dashboard_ids else []
+        definition_ids = session.scalars(
+            select(KpiDefinition.definition_id)
+            .where(KpiDefinition.department_id.in_(department_ids))
+        ).all()
+        series_ids = session.scalars(
+            select(KpiSeries.series_id)
+            .where(KpiSeries.definition_id.in_(definition_ids))
+        ).all() if definition_ids else []
+
+        if widget_ids:
+            session.execute(delete(KpiWidgetSeries).where(KpiWidgetSeries.widget_id.in_(widget_ids)))
+            session.execute(delete(KpiDashboardWidget).where(KpiDashboardWidget.widget_id.in_(widget_ids)))
+        if dashboard_ids:
+            session.execute(delete(KpiDashboard).where(KpiDashboard.dashboard_id.in_(dashboard_ids)))
+        if series_ids:
+            session.execute(delete(KpiValue).where(KpiValue.series_id.in_(series_ids)))
+        if definition_ids:
+            session.execute(delete(KpiSeries).where(KpiSeries.definition_id.in_(definition_ids)))
+            session.execute(delete(KpiDefinition).where(KpiDefinition.definition_id.in_(definition_ids)))
+        for item_id in reversed(department_ids):
+            session.execute(delete(KpiDepartment).where(KpiDepartment.department_id == item_id))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/departments/{department_id}/definitions", response_model=list[DefinitionView])
@@ -202,6 +297,85 @@ def list_definitions(
         )
         for item in definitions
     ]
+
+
+@router.get(
+    "/departments/{department_id}/series-preview",
+    response_model=list[WidgetSeriesView],
+)
+def preview_series(
+    department_id: uuid.UUID,
+    request: Request,
+    series_ids: list[uuid.UUID] = Query(alias="seriesIds"),
+    period_count: int = Query(default=8, alias="periodCount", ge=4, le=60),
+    _identity=Depends(require_identity),
+) -> list[WidgetSeriesView]:
+    allowed_period_counts = {4, 8, 12, 16, 24, 36, 52, 60}
+    if not series_ids or len(series_ids) > 10 or len(set(series_ids)) != len(series_ids):
+        raise ApiError(400, "invalid_request")
+    if period_count not in allowed_period_counts:
+        raise ApiError(400, "invalid_request")
+
+    with _factory(request)() as session:
+        _required(session, KpiDepartment, department_id, "department_id")
+        joined = session.execute(
+            select(KpiSeries, KpiDefinition)
+            .join(KpiDefinition, KpiDefinition.definition_id == KpiSeries.definition_id)
+            .where(
+                KpiDefinition.department_id == department_id,
+                KpiSeries.series_id.in_(series_ids),
+            )
+        ).all()
+        by_series_id = {series.series_id: (series, definition) for series, definition in joined}
+        if len(by_series_id) != len(series_ids):
+            raise ApiError(404, "not_found")
+
+        now = datetime.now(timezone.utc)
+        periods_by_series = {
+            series_id: last_period_starts(now, by_series_id[series_id][1].cadence, count=period_count)
+            for series_id in series_ids
+        }
+        all_periods = {storage_period_start(period) for periods in periods_by_series.values() for period in periods}
+        values = session.scalars(
+            select(KpiValue).where(
+                KpiValue.series_id.in_(series_ids),
+                KpiValue.period_start.in_(all_periods),
+            )
+        ).all() if all_periods else []
+
+    values_by_key = {(value.series_id, _aware(value.period_start)): value for value in values}
+    sides_by_unit: dict[str, str] = {}
+    next_side = "left"
+    previews = []
+    for series_id in series_ids:
+        series, definition = by_series_id[series_id]
+        if definition.unit not in sides_by_unit:
+            sides_by_unit[definition.unit] = next_side
+            next_side = "right"
+        periods = periods_by_series[series_id]
+        previews.append(
+            WidgetSeriesView(
+                seriesId=series.series_id,
+                definitionId=definition.definition_id,
+                name=definition.name,
+                unit=definition.unit,
+                precision=definition.precision,
+                cadence=definition.cadence,
+                label=series.label,
+                axisSide=sides_by_unit[definition.unit],
+                points=[
+                    ValuePointView(
+                        periodStart=period,
+                        value=_decimal_text(value.numeric_value) if (value := values_by_key.get((series_id, storage_period_start(period)))) else None,
+                        comment=value.comment if value else None,
+                        updatedAt=_aware(value.updated_at) if value else None,
+                        isCurrentPeriod=period == current_period_start(now, definition.cadence),
+                    )
+                    for period in periods
+                ],
+            )
+        )
+    return previews
 
 
 @router.post(
@@ -430,6 +604,33 @@ def update_dashboard(
     return result
 
 
+@router.delete("/dashboards/{dashboard_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_dashboard(
+    dashboard_id: uuid.UUID,
+    request: Request,
+    _admin=Depends(require_admin),
+    _csrf: None = Depends(require_same_origin_json),
+) -> Response:
+    with _factory(request)() as session, session.begin():
+        dashboard = _required(session, KpiDashboard, dashboard_id, "dashboard_id")
+        widget_ids = session.scalars(
+            select(KpiDashboardWidget.widget_id).where(
+                KpiDashboardWidget.dashboard_id == dashboard_id
+            )
+        ).all()
+        if widget_ids:
+            session.execute(
+                delete(KpiWidgetSeries).where(KpiWidgetSeries.widget_id.in_(widget_ids))
+            )
+            session.execute(
+                delete(KpiDashboardWidget).where(
+                    KpiDashboardWidget.dashboard_id == dashboard_id
+                )
+            )
+        session.delete(dashboard)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/dashboards/{dashboard_id}", response_model=DashboardDetailView)
 def get_dashboard(
     dashboard_id: uuid.UUID,
@@ -458,7 +659,7 @@ def get_dashboard(
         ).all() if series_ids else []
         series_with_definitions = {series.series_id: (series, definition) for series, definition in joined_series}
         now = datetime.now(timezone.utc)
-        periods_by_widget: dict[uuid.UUID, list[date]] = {}
+        periods_by_widget: dict[uuid.UUID, list[PeriodStart]] = {}
         for widget in widgets:
             widget_links = [link for link in links if link.widget_id == widget.widget_id]
             if not widget_links:
@@ -469,7 +670,7 @@ def get_dashboard(
             periods_by_widget[widget.widget_id] = _dashboard_periods(
                 dashboard, cadence, widget.period_count, now
             )
-        all_periods = {period for periods in periods_by_widget.values() for period in periods}
+        all_periods = {storage_period_start(period) for periods in periods_by_widget.values() for period in periods}
         value_rows = session.scalars(
             select(KpiValue).where(
                 KpiValue.series_id.in_(series_ids),
@@ -477,7 +678,7 @@ def get_dashboard(
             )
         ).all() if series_ids and all_periods else []
 
-    values = {(item.series_id, item.period_start): item for item in value_rows}
+    values = {(item.series_id, _aware(item.period_start)): item for item in value_rows}
     links_by_widget: dict[uuid.UUID, list[KpiWidgetSeries]] = {}
     for link in links:
         links_by_widget.setdefault(link.widget_id, []).append(link)
@@ -489,7 +690,7 @@ def get_dashboard(
             series, definition = series_with_definitions[link.series_id]
             points = []
             for period in widget_periods:
-                value = values.get((series.series_id, period))
+                value = values.get((series.series_id, storage_period_start(period)))
                 points.append(
                     ValuePointView(
                         periodStart=period,
@@ -509,6 +710,7 @@ def get_dashboard(
                     cadence=definition.cadence,
                     label=series.label,
                     axisSide=link.axis_side,
+                    color=link.series_color,
                     points=points,
                 )
             )
@@ -524,6 +726,8 @@ def get_dashboard(
                 gridWidth=widget.grid_width,
                 gridHeight=widget.grid_height,
                 periodCount=widget.period_count,
+                showLinearTrend=widget.show_linear_trend,
+                showMovingAverage=widget.show_moving_average,
                 periods=widget_periods,
                 series=series_views,
             )
@@ -534,6 +738,7 @@ def get_dashboard(
             departmentId=department.department_id,
             name=department.name,
             sortOrder=department.sort_order,
+            parentDepartmentId=department.parent_department_id,
         ),
         widgets=widget_views,
     )
@@ -567,6 +772,8 @@ def create_widget(
             grid_width=payload.grid_width,
             grid_height=payload.grid_height,
             period_count=payload.period_count,
+            show_linear_trend=payload.show_linear_trend,
+            show_moving_average=payload.show_moving_average,
         )
         session.add(widget)
         session.flush()
@@ -577,6 +784,7 @@ def create_widget(
                     series_id=series.series_id,
                     sort_order=order,
                     axis_side=sides[series.series_id],
+                    series_color=(payload.series_colors or {}).get(series.series_id),
                 )
             )
         session.flush()
@@ -603,13 +811,24 @@ def update_widget(
             widget.title = payload.title
         if "description" in payload.model_fields_set:
             widget.description = _clean_optional_text(payload.description)
-        for field_name in ("sort_order", "grid_x", "grid_y", "grid_width", "grid_height", "period_count"):
+        for field_name in (
+            "sort_order", "grid_x", "grid_y", "grid_width", "grid_height", "period_count",
+            "show_linear_trend", "show_moving_average",
+        ):
             value = getattr(payload, field_name)
             if value is not None:
                 setattr(widget, field_name, value)
+        current_links = session.scalars(
+            select(KpiWidgetSeries).where(KpiWidgetSeries.widget_id == widget_id)
+        ).all()
+        current_colors = {link.series_id: link.series_color for link in current_links}
+        target_series_ids = set(payload.series_ids) if payload.series_ids is not None else set(current_colors)
+        if payload.series_colors is not None and not set(payload.series_colors).issubset(target_series_ids):
+            raise ApiError(400, "invalid_request")
         if payload.series_ids is not None:
             selected = _load_compatible_series(session, dashboard, payload.series_ids)
             sides = _axis_sides(selected, payload.series)
+            colors_by_series = {**current_colors, **(payload.series_colors or {})}
             session.execute(delete(KpiWidgetSeries).where(KpiWidgetSeries.widget_id == widget_id))
             for order, (series, _definition) in enumerate(selected):
                 session.add(
@@ -618,8 +837,14 @@ def update_widget(
                         series_id=series.series_id,
                         sort_order=order,
                         axis_side=sides[series.series_id],
+                        series_color=colors_by_series.get(series.series_id),
                     )
                 )
+        elif payload.series_colors is not None:
+            colors_by_series = payload.series_colors
+            for link in current_links:
+                if link.series_id in colors_by_series:
+                    link.series_color = colors_by_series[link.series_id]
         session.flush()
         result = _widget_config_view(session, widget)
     return result
@@ -642,7 +867,7 @@ def delete_widget(
 @router.put("/series/{series_id}/values/{period_start}")
 def write_value(
     series_id: uuid.UUID,
-    period_start: date,
+    period_start: str,
     payload: WriteValueRequest,
     request: Request,
     _identity=Depends(require_identity),
@@ -655,33 +880,33 @@ def write_value(
         if series is None:
             raise ApiError(404, "not_found")
         definition = _required(session, KpiDefinition, series.definition_id, "definition_id")
-        if period_start_for(period_start, definition.cadence) != period_start:
-            raise ApiError(400, "invalid_period_start")
+        logical_period = _parse_period_start(period_start, definition.cadence)
+        stored_period = storage_period_start(logical_period)
         quantum = Decimal(1).scaleb(-definition.precision)
         if payload.value.quantize(quantum) != payload.value:
             raise ApiError(400, "invalid_precision")
         value = session.scalar(
             select(KpiValue)
-            .where(KpiValue.series_id == series_id, KpiValue.period_start == period_start)
+            .where(KpiValue.series_id == series_id, KpiValue.period_start == stored_period)
             .with_for_update()
         )
         if not _matches_expected(value.updated_at if value else None, payload.expected_updated_at):
             raise ApiError(409, "value_conflict")
         if value is None:
-            value = KpiValue(series_id=series_id, period_start=period_start, numeric_value=payload.value)
+            value = KpiValue(series_id=series_id, period_start=stored_period, numeric_value=payload.value)
             session.add(value)
         value.numeric_value = payload.value
         value.comment = _clean_optional_text(payload.comment)
         value.updated_at = datetime.now(timezone.utc)
         session.flush()
-        result = _value_response(value)
+        result = _value_response(value, definition.cadence)
     return result
 
 
 @router.delete("/series/{series_id}/values/{period_start}")
 def delete_value(
     series_id: uuid.UUID,
-    period_start: date,
+    period_start: str,
     payload: DeleteValueRequest,
     request: Request,
     _identity=Depends(require_identity),
@@ -693,9 +918,11 @@ def delete_value(
         )
         if series is None:
             raise ApiError(404, "not_found")
+        definition = _required(session, KpiDefinition, series.definition_id, "definition_id")
+        stored_period = storage_period_start(_parse_period_start(period_start, definition.cadence))
         value = session.scalar(
             select(KpiValue)
-            .where(KpiValue.series_id == series_id, KpiValue.period_start == period_start)
+            .where(KpiValue.series_id == series_id, KpiValue.period_start == stored_period)
             .with_for_update()
         )
         if value is None or not _matches_expected(value.updated_at, payload.expected_updated_at):
@@ -709,7 +936,7 @@ def _load_compatible_series(
     dashboard: KpiDashboard,
     series_ids: list[uuid.UUID],
 ) -> list[tuple[KpiSeries, KpiDefinition]]:
-    if len(series_ids) < 2 or len(series_ids) > 4 or len(set(series_ids)) != len(series_ids):
+    if len(series_ids) < 1 or len(series_ids) > 10 or len(set(series_ids)) != len(series_ids):
         raise ApiError(400, "invalid_request")
     rows = session.execute(
         select(KpiSeries, KpiDefinition)
@@ -754,7 +981,7 @@ def _dashboard_periods(
     cadence: Cadence,
     period_count: int,
     now: datetime,
-) -> list[date]:
+) -> list[PeriodStart]:
     if dashboard.range_start is not None and dashboard.range_end is not None:
         return intersecting_period_starts(dashboard.range_start, dashboard.range_end, cadence)
     return last_period_starts(now, cadence, count=period_count)
@@ -793,6 +1020,8 @@ def _widget_config_view(session: Session, widget: KpiDashboardWidget) -> WidgetV
         gridWidth=widget.grid_width,
         gridHeight=widget.grid_height,
         periodCount=widget.period_count,
+        showLinearTrend=widget.show_linear_trend,
+        showMovingAverage=widget.show_moving_average,
         periods=[],
         series=[
             WidgetSeriesView(
@@ -804,6 +1033,7 @@ def _widget_config_view(session: Session, widget: KpiDashboardWidget) -> WidgetV
                 cadence=item[1].cadence,
                 label=item[0].label,
                 axisSide=link.axis_side,
+                color=link.series_color,
                 points=[],
             )
             for link in links
@@ -839,10 +1069,28 @@ def _decimal_text(value: Decimal) -> str:
     return format(value.normalize(), "f")
 
 
-def _value_response(value: KpiValue) -> dict[str, Any]:
+def _parse_period_start(value: str, cadence: Cadence) -> PeriodStart:
+    try:
+        period: PeriodStart = datetime.fromisoformat(value.replace("Z", "+00:00")) if cadence == "hour" else date.fromisoformat(value)
+        if cadence == "hour" and (not isinstance(period, datetime) or period.utcoffset() is None):
+            raise ValueError("hour periods require a timezone-aware timestamp")
+        normalized = period_start_for(period, cadence)
+        if isinstance(period, datetime):
+            aligned = normalized.astimezone(timezone.utc) == period.astimezone(timezone.utc)
+        else:
+            aligned = normalized == period
+        if not aligned:
+            raise ValueError("period start is not aligned to cadence")
+        return normalized
+    except ValueError as error:
+        raise ApiError(400, "invalid_period_start") from error
+
+
+def _value_response(value: KpiValue, cadence: Cadence) -> dict[str, Any]:
+    period = period_start_for(_aware(value.period_start), cadence)
     return {
         "seriesId": str(value.series_id),
-        "periodStart": value.period_start.isoformat(),
+        "periodStart": period.isoformat(),
         "value": _decimal_text(value.numeric_value),
         "comment": value.comment,
         "updatedAt": _aware(value.updated_at).isoformat().replace("+00:00", "Z"),

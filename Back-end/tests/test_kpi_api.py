@@ -144,7 +144,7 @@ def test_kpi_workspace_persists_reused_series_values_and_layout():
         assert loaded.headers["cache-control"] == "private, no-store"
 
 
-def test_widget_requires_two_to_four_series_with_one_cadence():
+def test_widget_limits_series_to_ten_and_requires_one_cadence():
     with _client() as client:
         department_id = _department(client, "Operations")
         dashboard_id = _dashboard(client, department_id, "Operations")
@@ -152,7 +152,7 @@ def test_widget_requires_two_to_four_series_with_one_cadence():
         monthly = _series(client, _definition(client, department_id, "Monthly", cadence="month"), "Current")
         other_ids = [
             _series(client, _definition(client, department_id, f"KPI {index}"), "Current")
-            for index in range(4)
+            for index in range(10)
         ]
 
         mixed = _mutate(
@@ -191,6 +191,46 @@ def test_widget_assigns_two_units_to_separate_axes():
     assert [series["axisSide"] for series in widget.json()["series"]] == ["left", "right"]
 
 
+def test_widget_trend_options_default_off_and_persist_independently():
+    with _client() as client:
+        department_id = _department(client, "Operations")
+        dashboard_id = _dashboard(client, department_id, "Operations")
+        series_id = _series(client, _definition(client, department_id, "Volume"), "Actual")
+        created = _mutate(
+            client,
+            "post",
+            f"/api/v1/kpi/dashboards/{dashboard_id}/widgets",
+            json={"title": "Volume", "seriesIds": [series_id]},
+        )
+        widget_id = created.json()["widgetId"]
+        enabled = _mutate(
+            client,
+            "patch",
+            f"/api/v1/kpi/widgets/{widget_id}",
+            json={"showLinearTrend": True, "showMovingAverage": True},
+        )
+        loaded = client.get(f"/api/v1/kpi/dashboards/{dashboard_id}")
+        disabled_trend = _mutate(
+            client,
+            "patch",
+            f"/api/v1/kpi/widgets/{widget_id}",
+            json={"showLinearTrend": False},
+        )
+
+    assert created.status_code == 201
+    assert created.json()["showLinearTrend"] is False
+    assert created.json()["showMovingAverage"] is False
+    assert enabled.status_code == 200
+    assert enabled.json()["showLinearTrend"] is True
+    assert enabled.json()["showMovingAverage"] is True
+    assert loaded.status_code == 200
+    assert loaded.json()["widgets"][0]["showLinearTrend"] is True
+    assert loaded.json()["widgets"][0]["showMovingAverage"] is True
+    assert disabled_trend.status_code == 200
+    assert disabled_trend.json()["showLinearTrend"] is False
+    assert disabled_trend.json()["showMovingAverage"] is True
+
+
 def test_value_write_uses_optimistic_concurrency_and_same_origin():
     with _client() as client:
         department_id = _department(client, "Operations")
@@ -220,6 +260,66 @@ def test_value_write_uses_optimistic_concurrency_and_same_origin():
     assert stale.status_code == 409
     assert stale.json() == {"error": {"code": "value_conflict"}}
     assert blocked.status_code == 403
+
+
+
+
+def test_value_write_accepts_aligned_period_starts_for_each_cadence():
+    period_starts = {
+        "hour": "2026-11-10T12:00:00-06:00",
+        "day": "2026-11-10",
+        "week": "2026-11-07",
+        "month": "2026-11-01",
+        "year": "2026-01-01",
+    }
+    with _client() as client:
+        department_id = _department(client, "Operations")
+        responses = {}
+        for cadence, period_start in period_starts.items():
+            definition_id = _definition(client, department_id, f"{cadence} KPI", cadence=cadence)
+            series_id = _series(client, definition_id, "Actual")
+            responses[cadence] = _mutate(
+                client,
+                "put",
+                f"/api/v1/kpi/series/{series_id}/values/{period_start}",
+                json={"value": "1", "expectedUpdatedAt": None},
+            )
+
+    for cadence, response in responses.items():
+        assert response.status_code == 200, (cadence, response.json())
+        assert response.json()["periodStart"] == period_starts[cadence]
+
+
+def test_hour_value_write_accepts_both_ambiguous_dst_hours():
+    with _client() as client:
+        department_id = _department(client, "Operations")
+        definition_id = _definition(client, department_id, "Hourly volume", cadence="hour")
+        series_id = _series(client, definition_id, "Actual")
+        first_hour = _mutate(
+            client,
+            "put",
+            f"/api/v1/kpi/series/{series_id}/values/2026-11-01T01:00:00-05:00",
+            json={"value": "1", "expectedUpdatedAt": None},
+        )
+        second_hour = _mutate(
+            client,
+            "put",
+            f"/api/v1/kpi/series/{series_id}/values/2026-11-01T01:00:00-06:00",
+            json={"value": "2", "expectedUpdatedAt": None},
+        )
+        unaligned = _mutate(
+            client,
+            "put",
+            f"/api/v1/kpi/series/{series_id}/values/2026-11-01T01:30:00-05:00",
+            json={"value": "3", "expectedUpdatedAt": None},
+        )
+
+    assert first_hour.status_code == 200
+    assert first_hour.json()["periodStart"] == "2026-11-01T01:00:00-05:00"
+    assert second_hour.status_code == 200
+    assert second_hour.json()["periodStart"] == "2026-11-01T01:00:00-06:00"
+    assert unaligned.status_code == 400
+    assert unaligned.json() == {"error": {"code": "invalid_period_start"}}
 
 
 def test_all_users_can_write_values_but_only_admins_can_change_structure():

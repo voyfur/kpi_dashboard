@@ -7,6 +7,7 @@ from decimal import Decimal
 import uuid
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -31,13 +32,24 @@ class KpiDepartment(Base):
     __tablename__ = "kpi_departments"
     __table_args__ = (
         CheckConstraint("length(btrim(name)) > 0", name="name_nonempty"),
+        CheckConstraint(
+            "color IS NULL OR color IN ('blue', 'teal', 'green', 'amber', 'rose', 'violet')",
+            name="color_allowed",
+        ),
         CheckConstraint("sort_order >= 0", name="sort_order_nonnegative"),
+        Index("ix_kpi_departments_parent_sort", "parent_department_id", "sort_order"),
     )
 
     department_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
+    emoji: Mapped[str | None] = mapped_column(String(16))
+    color: Mapped[str | None] = mapped_column(String(16))
+    parent_department_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("kpi_departments.department_id", ondelete="RESTRICT"),
+    )
     sort_order: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
     )
@@ -98,7 +110,7 @@ class KpiDefinition(Base):
         CheckConstraint("length(btrim(unit)) > 0", name="unit_nonempty"),
         CheckConstraint("precision >= 0", name="precision_nonnegative"),
         CheckConstraint(
-            "cadence IN ('week', 'month', 'year')", name="cadence_allowed"
+            "cadence IN ('hour', 'day', 'week', 'month', 'year')", name="cadence_allowed"
         ),
         Index("ix_kpi_definitions_department", "department_id"),
     )
@@ -187,6 +199,8 @@ class KpiDashboardWidget(Base):
     period_count: Mapped[int] = mapped_column(
         Integer, nullable=False, default=8, server_default=text("8")
     )
+    show_linear_trend: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    show_moving_average: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -221,6 +235,7 @@ class KpiWidgetSeries(Base):
     axis_side: Mapped[str] = mapped_column(
         String(5), nullable=False, default="left", server_default=text("'left'")
     )
+    series_color: Mapped[str | None] = mapped_column(String(7), nullable=True)
 
 
 class KpiValue(Base):
@@ -237,7 +252,7 @@ class KpiValue(Base):
         ForeignKey("kpi_series.series_id", ondelete="RESTRICT"),
         nullable=False,
     )
-    period_start: Mapped[date] = mapped_column(Date, nullable=False)
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     numeric_value: Mapped[Decimal] = mapped_column(Numeric(), nullable=False)
     comment: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(

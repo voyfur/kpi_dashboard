@@ -1,10 +1,14 @@
 import { requestJson } from './api.ts';
 
-export type KpiCadence = 'week' | 'month' | 'year';
+export type KpiCadence = 'hour' | 'day' | 'week' | 'month' | 'year';
+export type KpiDepartmentColor = 'blue' | 'teal' | 'green' | 'amber' | 'rose' | 'violet';
 export type KpiDepartment = {
   departmentId: string;
   name: string;
+  emoji: string | null;
+  color: KpiDepartmentColor | null;
   sortOrder: number;
+  parentDepartmentId: string | null;
   dashboards: KpiDashboardSummary[];
 };
 export type KpiDashboardSummary = {
@@ -40,6 +44,7 @@ export type KpiWidgetSeries = {
   cadence: KpiCadence;
   label: string;
   axisSide: 'left' | 'right';
+  color: string | null;
   points: KpiPoint[];
 };
 export type KpiWidget = {
@@ -53,6 +58,8 @@ export type KpiWidget = {
   gridWidth: number;
   gridHeight: number;
   periodCount: number;
+  showLinearTrend: boolean;
+  showMovingAverage: boolean;
   periods: string[];
   series: KpiWidgetSeries[];
 };
@@ -69,15 +76,26 @@ export function listKpiDepartments(): Promise<KpiDepartment[]> {
   return requestJson(`${root}/departments`, 'GET') as Promise<KpiDepartment[]>;
 }
 
-export function createKpiDepartment(name: string): Promise<Omit<KpiDepartment, 'dashboards'>> {
-  return requestJson(`${root}/departments`, 'POST', { name }) as Promise<Omit<KpiDepartment, 'dashboards'>>;
+export function createKpiDepartment(
+  name: string,
+  parentDepartmentId: string | null = null,
+): Promise<Omit<KpiDepartment, 'dashboards'>> {
+  return requestJson(`${root}/departments`, 'POST', { name, parentDepartmentId }) as Promise<Omit<KpiDepartment, 'dashboards'>>;
 }
 
 export function updateKpiDepartment(
   departmentId: string,
-  patch: { name?: string; sortOrder?: number },
+  patch: { name?: string; emoji?: string | null; color?: KpiDepartmentColor | null; sortOrder?: number; parentDepartmentId?: string | null },
 ): Promise<Omit<KpiDepartment, 'dashboards'>> {
   return requestJson(`${root}/departments/${departmentId}`, 'PATCH', patch) as Promise<Omit<KpiDepartment, 'dashboards'>>;
+}
+
+export function deleteKpiDepartment(departmentId: string, confirmationName: string): Promise<void> {
+  return requestJson(`${root}/departments/${departmentId}`, 'DELETE', { confirmationName }) as Promise<void>;
+}
+
+export function deleteKpiDashboard(dashboardId: string): Promise<void> {
+  return requestJson(`${root}/dashboards/${dashboardId}`, 'DELETE', {}) as Promise<void>;
 }
 
 export function createKpiDashboard(departmentId: string, name: string): Promise<KpiDashboardSummary> {
@@ -112,9 +130,32 @@ export function createKpiSeries(definitionId: string, label: string): Promise<{ 
 
 export function createKpiWidget(
   dashboardId: string,
-  input: { title: string; seriesIds: string[] },
+  input: {
+    title: string;
+    description?: string | null;
+    seriesIds: string[];
+    gridX: number;
+    gridY: number;
+    gridWidth: number;
+    gridHeight: number;
+    periodCount: number;
+    showLinearTrend?: boolean;
+    showMovingAverage?: boolean;
+    series?: { seriesId: string; axisSide: 'left' | 'right' }[];
+    seriesColors?: Record<string, string | null>;
+  },
 ): Promise<KpiWidget> {
   return requestJson(`${root}/dashboards/${dashboardId}/widgets`, 'POST', input) as Promise<KpiWidget>;
+}
+
+export function loadKpiSeriesPreview(
+  departmentId: string,
+  seriesIds: string[],
+  periodCount: number,
+): Promise<KpiWidgetSeries[]> {
+  const query = new URLSearchParams({ periodCount: String(periodCount) });
+  seriesIds.forEach((seriesId) => query.append('seriesIds', seriesId));
+  return requestJson(`${root}/departments/${departmentId}/series-preview?${query}`, 'GET') as Promise<KpiWidgetSeries[]>;
 }
 
 export function loadKpiDashboard(dashboardId: string): Promise<KpiDashboard> {
@@ -128,7 +169,7 @@ export function updateKpiDashboard(
   return requestJson(`${root}/dashboards/${dashboardId}`, 'PATCH', patch);
 }
 
-export function updateKpiWidget(widgetId: string, patch: Partial<Pick<KpiWidget, 'title' | 'description' | 'sortOrder' | 'gridWidth' | 'gridHeight' | 'periodCount'>> & { seriesIds?: string[] }): Promise<KpiWidget> {
+export function updateKpiWidget(widgetId: string, patch: Partial<Pick<KpiWidget, 'title' | 'description' | 'sortOrder' | 'gridX' | 'gridY' | 'gridWidth' | 'gridHeight' | 'periodCount' | 'showLinearTrend' | 'showMovingAverage'>> & { seriesIds?: string[]; seriesColors?: Record<string, string | null> }): Promise<KpiWidget> {
   return requestJson(`${root}/widgets/${widgetId}`, 'PATCH', patch) as Promise<KpiWidget>;
 }
 
@@ -141,9 +182,9 @@ export function writeKpiValue(
   periodStart: string,
   input: { value: string; comment: string | null; expectedUpdatedAt: string | null },
 ): Promise<{ seriesId: string; periodStart: string; value: string; comment: string | null; updatedAt: string }> {
-  return requestJson(`${root}/series/${seriesId}/values/${periodStart}`, 'PUT', input) as Promise<{ seriesId: string; periodStart: string; value: string; comment: string | null; updatedAt: string }>;
+  return requestJson(`${root}/series/${seriesId}/values/${encodeURIComponent(periodStart)}`, 'PUT', input) as Promise<{ seriesId: string; periodStart: string; value: string; comment: string | null; updatedAt: string }>;
 }
 
 export function deleteKpiValue(seriesId: string, periodStart: string, expectedUpdatedAt: string): Promise<void> {
-  return requestJson(`${root}/series/${seriesId}/values/${periodStart}`, 'DELETE', { expectedUpdatedAt }) as Promise<void>;
+  return requestJson(`${root}/series/${seriesId}/values/${encodeURIComponent(periodStart)}`, 'DELETE', { expectedUpdatedAt }) as Promise<void>;
 }

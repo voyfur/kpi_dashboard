@@ -20,7 +20,7 @@ def test_standalone_schema_has_its_own_initial_migration_head():
 
     assert revision is not None
     assert revision.down_revision is None
-    assert scripts.get_current_head() == "0001_kpi_schema"
+    assert scripts.get_current_head() == "0006_widget_series_colors"
 
 
 def test_initial_migration_creates_seven_shared_kpi_tables():

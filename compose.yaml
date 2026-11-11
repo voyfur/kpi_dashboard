@@ -1,0 +1,69 @@
+services:
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${KPI_POSTGRES_PASSWORD:?Set KPI_POSTGRES_PASSWORD in .env}
+      KPI_MIGRATOR_PASSWORD: ${KPI_MIGRATOR_PASSWORD:?Set KPI_MIGRATOR_PASSWORD in .env}
+      KPI_APP_PASSWORD: ${KPI_APP_PASSWORD:?Set KPI_APP_PASSWORD in .env}
+    volumes:
+      - kpi_dashboard_data:/var/lib/postgresql
+      - ./Back-end/docker/init-local-database.sh:/docker-entrypoint-initdb.d/10-init-kpi-database.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    image: kpi-dashboards-backend:local
+    build:
+      context: ./Back-end
+    environment:
+      KPI_ENV: development
+      KPI_DATABASE_URL: postgresql+psycopg://kpi_migrator:${KPI_MIGRATOR_PASSWORD}@db:5432/kpi_dashboard
+      KPI_MIGRATOR_PASSWORD: ${KPI_MIGRATOR_PASSWORD}
+    command: ["sh", "docker/migrate-local.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    image: kpi-dashboards-backend:local
+    build:
+      context: ./Back-end
+    env_file:
+      - ./Back-end/.env
+    environment:
+      KPI_ENV: development
+      KPI_DATABASE_URL: postgresql+psycopg://kpi_app:${KPI_APP_PASSWORD}@db:5432/kpi_dashboard
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./Front-end/app
+    environment:
+      KPI_API_TARGET: http://api:8000
+    ports:
+      - "127.0.0.1:5173:5173"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  kpi_dashboard_data:
+    name: kpi-dashboards-local-data

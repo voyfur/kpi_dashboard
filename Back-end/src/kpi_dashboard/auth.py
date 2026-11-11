@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -100,6 +101,40 @@ class UnavailableAuthProvider:
 
     def logout(self, token: str) -> None:
         raise AuthServiceUnavailable("corporate auth API is not configured")
+
+
+class LocalDevelopmentAuthProvider:
+    """Local-only admin sign-in for disposable development environments."""
+
+    def __init__(self, email: str, password: str) -> None:
+        self._email = email.strip()
+        self._password = password
+        self._identity = {
+            "id": "local-development-admin",
+            "email": self._email,
+            "isAdmin": True,
+            "pages": [],
+        }
+        self._active_tokens: set[str] = set()
+
+    def login(self, email: str, password: str) -> tuple[dict[str, Any], str] | None:
+        email_matches = secrets.compare_digest(
+            email.strip().casefold().encode(),
+            self._email.casefold().encode(),
+        )
+        password_matches = secrets.compare_digest(password.encode(), self._password.encode())
+        if not email_matches or not password_matches:
+            return None
+
+        token = secrets.token_urlsafe(32)
+        self._active_tokens.add(token)
+        return self._identity.copy(), token
+
+    def resolve(self, token: str) -> dict[str, Any] | None:
+        return self._identity.copy() if token in self._active_tokens else None
+
+    def logout(self, token: str) -> None:
+        self._active_tokens.discard(token)
 
 
 def _read_identity(response: httpx.Response) -> dict[str, Any]:

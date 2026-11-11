@@ -11,6 +11,8 @@ class Settings:
     dashboard_auth_api_url: str | None
     dashboard_public_url: str | None
     kpi_database_url: str | None
+    dev_auth_email: str | None
+    dev_auth_password: str | None
 
     @property
     def cookie_secure(self) -> bool:
@@ -24,4 +26,6 @@ def load_settings() -> Settings:
         dashboard_auth_api_url=os.getenv("DASHBOARD_AUTH_API_URL"),
         dashboard_public_url=os.getenv("DASHBOARD_PUBLIC_URL"),
         kpi_database_url=os.getenv("KPI_DATABASE_URL"),
+        dev_auth_email=os.getenv("KPI_DEV_AUTH_EMAIL"),
+        dev_auth_password=os.getenv("KPI_DEV_AUTH_PASSWORD"),
     )

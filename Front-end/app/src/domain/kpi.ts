@@ -54,8 +54,68 @@ export function splitKpiLineSegments(
   return segments;
 }
 
+export type KpiLinearTrendSegment = {
+  startIndex: number;
+  endIndex: number;
+  startValue: number;
+  endValue: number;
+};
+
+export function getLinearTrendSegment(values: readonly (string | null)[]): KpiLinearTrendSegment | null {
+  const observations = values.flatMap((value, index) => {
+    const numericValue = parseKpiNumber(value);
+    return numericValue === null ? [] : [{ index, value: numericValue }];
+  });
+  if (observations.length < 2) return null;
+
+  const meanIndex = observations.reduce((total, point) => total + point.index, 0) / observations.length;
+  const meanValue = observations.reduce((total, point) => total + point.value, 0) / observations.length;
+  const denominator = observations.reduce((total, point) => total + (point.index - meanIndex) ** 2, 0);
+  const slope = observations.reduce(
+    (total, point) => total + (point.index - meanIndex) * (point.value - meanValue),
+    0,
+  ) / denominator;
+  const intercept = meanValue - slope * meanIndex;
+  const maximumIndex = values.length - 1;
+  const minimumSpan = maximumIndex / 2;
+  let startIndex = Math.max(0, observations[0].index - 0.5);
+  let endIndex = Math.min(maximumIndex, observations[observations.length - 1].index + 0.5);
+
+  if (endIndex - startIndex < minimumSpan) {
+    const center = (startIndex + endIndex) / 2;
+    startIndex = center - minimumSpan / 2;
+    endIndex = center + minimumSpan / 2;
+    if (startIndex < 0) {
+      endIndex -= startIndex;
+      startIndex = 0;
+    }
+    if (endIndex > maximumIndex) {
+      startIndex -= endIndex - maximumIndex;
+      endIndex = maximumIndex;
+    }
+  }
+
+  return {
+    startIndex,
+    endIndex,
+    startValue: intercept + slope * startIndex,
+    endValue: intercept + slope * endIndex,
+  };
+}
+
+export function getMovingAverageValues(values: readonly (string | null)[]): (number | null)[] {
+  const numericValues = values.map(parseKpiNumber);
+  return values.map((_, index) => {
+    if (index < 2) return null;
+    const window = numericValues.slice(index - 2, index + 1);
+    const [first, second, third] = window;
+    if (first === null || second === null || third === null) return null;
+    return (first + second + third) / 3;
+  });
+}
+
 export function validateKpiSeries(series: readonly KpiSeriesConfig[]): KpiSeriesValidation | null {
-  if (series.length < 2 || series.length > 4) return 'series-count';
+  if (series.length < 1 || series.length > 10) return 'series-count';
   if (new Set(series.map((item) => item.cadence)).size !== 1) return 'cadence';
   if (new Set(series.map((item) => item.unit)).size > 2) return 'units';
   return null;

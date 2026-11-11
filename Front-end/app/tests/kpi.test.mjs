@@ -45,7 +45,7 @@ test('remote dashboard updates replace only missing or saved cell drafts', () =>
 
 test('series validation guidance distinguishes row count, cadence, and unit limits', () => {
   assert.equal(typeof i18n.getKpiSeriesValidationMessage, 'function');
-  assert.equal(i18n.getKpiSeriesValidationMessage(i18n.messages.en, 'series-count'), 'Choose two to four series for this chart.');
+  assert.equal(i18n.getKpiSeriesValidationMessage(i18n.messages.en, 'series-count'), 'Choose one to ten series for this chart.');
   assert.equal(i18n.getKpiSeriesValidationMessage(i18n.messages.en, 'cadence'), 'All series in a chart must use the same period.');
   assert.equal(i18n.getKpiSeriesValidationMessage(i18n.messages.en, 'units'), 'A chart can contain at most two units of measure. Create a separate chart for a third unit.');
   assert.match(i18n.getKpiSeriesValidationMessage(i18n.messages.ru, 'units'), /не более двух.*отдельный график/);
@@ -63,4 +63,24 @@ test('moving a widget assigns contiguous sort orders to every widget', () => {
     { widgetId: 'first', sortOrder: 1 },
     { widgetId: 'third', sortOrder: 2 },
   ]);
+});
+
+test('linear trend fits visible observations and stays near the data range', () => {
+  assert.equal(typeof kpi.getLinearTrendSegment, 'function');
+  assert.deepEqual(
+    kpi.getLinearTrendSegment(['20', '25', '12', '44', null, null, null, null]),
+    { startIndex: 0, endIndex: 3.5, startValue: 16.4, endValue: 37.05 },
+  );
+  assert.deepEqual(
+    kpi.getLinearTrendSegment(['1', '2', '3', '4', '5', '6', '7', '8']),
+    { startIndex: 0, endIndex: 7, startValue: 1, endValue: 8 },
+  );
+});
+
+test('moving average uses three consecutive periods and preserves gaps', () => {
+  assert.equal(typeof kpi.getMovingAverageValues, 'function');
+  assert.deepEqual(
+    kpi.getMovingAverageValues(['3', '6', '9', '12', null, '15', '18', '21']),
+    [null, null, 6, 9, null, null, null, 18],
+  );
 });
